@@ -26,6 +26,9 @@ import com.untamedears.realisticbiomes.persist.Plant;
 import com.untamedears.realisticbiomes.persist.PlantManager;
 import com.untamedears.realisticbiomes.utils.Fruits;
 import com.untamedears.realisticbiomes.utils.MaterialAliases;
+import java.util.Queue;
+import java.util.concurrent.LinkedBlockingQueue;
+import org.bukkit.scheduler.BukkitTask;
 
 public class RealisticBiomes extends JavaPlugin {
 
@@ -35,6 +38,9 @@ public class RealisticBiomes extends JavaPlugin {
 	public static Level minLogLevel = Level.INFO;
 	
 	public HashMap<String, List<Biome>> biomeAliases;
+	private Queue<Runnable> rbTaskQueue;
+	public int maxTaskTime;
+	private BukkitTask taskQueueTask;
 	public GrowthMap materialGrowth;
 	public GrowthMap fishSpawn;
 	public boolean replaceFish;
@@ -75,6 +81,7 @@ public class RealisticBiomes extends JavaPlugin {
 		replaceFish = config.getBoolean("replace_fishing", false);
 		fishXPChance  = config.getDouble("fish_xp_chance", 1.0);
 		allowTallPlantReplication = config.getBoolean("allow_tallplant_replication", true);
+		maxTaskTime = config.getInt("max_task_time", 20);
 
 		// load the max log level for our logging hack
 		// if not defined then its just initalized at INFO
@@ -101,8 +108,28 @@ public class RealisticBiomes extends JavaPlugin {
 			blockGrower = new BlockGrower(plantManager, materialGrowth);
 			
 		}
+		
+		// Use a thread safe queue in case chunkloads are done async.
+		// The blocking functionality is *not* used.
+		rbTaskQueue = new LinkedBlockingQueue<>();
+		taskQueueTask = getServer().getScheduler().runTaskTimer(this, () -> {
+			long end = System.currentTimeMillis() + Math.max(2, maxTaskTime);
+			while (!rbTaskQueue.isEmpty() && System.currentTimeMillis() < end) {
+				rbTaskQueue.poll().run();
+			}
+		}, 1, 1);
 				
 		LOG.info("is now enabled.");
+	}
+	
+	/**
+	 * Adds a task to be run by RB at a later time. On the next tick, tasks will
+	 * be run until either the queue is empty or the time taken to run RB tasks
+	 * has exceeded max_task_time milliseconds.
+	 * @param r 
+	 */
+	public void addTask(Runnable r) {
+		rbTaskQueue.add(r);
 	}
 	
 	/**
@@ -337,6 +364,15 @@ public class RealisticBiomes extends JavaPlugin {
 	
 	@Override
 	public void onDisable() {
+		taskQueueTask.cancel();
+		this.doLog(Level.INFO, "Running remaining tasks");
+		while (!rbTaskQueue.isEmpty()) {
+			try {
+				rbTaskQueue.poll().run();
+			} catch (Exception e) {
+				this.doLog(Level.WARNING, "Exception thrown by task while disabling plugin", e);
+			}
+		}
 		if (persistConfig.enabled) {
 			LOG.info("saving plant growth data.");
 			plantManager.saveAllAndStop();

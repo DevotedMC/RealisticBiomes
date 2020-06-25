@@ -27,6 +27,10 @@ realistic_biomes:
  log_db_production: true
  log_db_production_chunk_load_mintime: 5
  log_db_production_chunk_unload_mintime: 5
+ 
+ # Amount of time RB should spend doing things like [growing chunkloaded plants]
+ # per tick. Added to prevent server lag from chunkloader recursion.
+ max_task_time: 20
 
 
  # catagories of biomes
