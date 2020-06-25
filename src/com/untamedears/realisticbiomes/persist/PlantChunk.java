@@ -16,6 +16,8 @@ import com.untamedears.realisticbiomes.DropGrouper;
 import com.untamedears.realisticbiomes.GrowthConfig;
 import com.untamedears.realisticbiomes.RealisticBiomes;
 import com.untamedears.realisticbiomes.utils.MaterialAliases;
+import java.util.ArrayList;
+import java.util.List;
 
 public class PlantChunk {
 	private final RealisticBiomes plugin;
@@ -161,6 +163,16 @@ public class PlantChunk {
 		World world = plugin.getServer().getWorld(WorldID.getMCID(coords.w));
 
 		DropGrouper dropGrouper = new DropGrouper(world);
+		
+		// If this ever needs changing in the future, please for the love of all
+		// that is good in the world use a subclass or something instead of an
+		// Object[]. "It works!" but it's not "good." The code that uses it is
+		// directly below, but it is not "readable."
+		// "But WHY??!?!?1?" in the first place
+		// Because the data needed to be moved out of the SQL-connection-eating
+		// chunkloader recursion, and the chunkloader recursion needed to be
+		// spaced across ticks.
+		List<Object[]> plantList = new ArrayList<>();
 
 		// execute the load plant statement
 		try (Connection connection = plugin.getPlantManager().getDb().getConnection();
@@ -178,30 +190,7 @@ public class PlantChunk {
 					long date = rs.getLong(5);
 					float growth = rs.getFloat(6);
 					float fruitGrowth = rs.getFloat(7);
-	
-					RealisticBiomes.doLog(Level.FINEST, String
-									.format("PlantChunk.load(): got result: w:%s x:%s y:%s z:%s date:%s growth:%s",
-											w, x, y, z, date, growth));
-	
-					// if the plant does not correspond to an actual crop, don't load it
-					if (MaterialAliases.getConfig(plugin.materialGrowth, world.getBlockAt(x, y, z)) == null) {
-						RealisticBiomes.doLog(Level.FINER, "Plantchunk.load(): plant we got from db doesn't correspond to an actual crop, not loading");
-						continue;
-					}
-	
-					Plant plant = new Plant(date, growth, fruitGrowth);
-	
-					Block block = world.getBlockAt(x, y, z);
-					GrowthConfig growthConfig = MaterialAliases.getConfig(plugin.materialGrowth, block);
-					if (growthConfig.isPersistent()) {
-						plugin.growPlant(plant, block, growthConfig, null, dropGrouper);
-					}
-	
-					// if the plant isn't finished growing, add it to the plants
-					if (!plant.isFullyGrown()) {
-						plants.put(new Coords(w, x, y, z), plant);
-						RealisticBiomes.doLog(Level.FINER, "PlantChunk.load(): plant not finished growing, adding to plants list");
-					}
+					plantList.add(new Object[] {w, x, y, z, date, growth, fruitGrowth});
 				}
 			}
 		} catch (SQLException e) {
@@ -210,6 +199,45 @@ public class PlantChunk {
 							"Failed to execute/load the data from the plants table (In PlantChunk.load()) with chunkId %s, coords %s",
 							index, coords), e);
 		}
+		
+		// Run the plant growth on a later tick to prevent chunkloader recursion
+		// when trees grow across chunk borders
+		// If this ever needs changing in the future, please for the love of all
+		// that is holy in the world read the above comment that starts the same
+		plugin.addTask(() -> {
+			for (Object[] oa : plantList) {
+				int w = (Integer)oa[0];
+				int x = (Integer)oa[1];
+				int y = (Integer)oa[2];
+				int z = (Integer)oa[3];
+				long date = (Long)oa[4];
+				float growth = (Float)oa[5];
+				float fruitGrowth = (Float)oa[6];
+
+				RealisticBiomes.doLog(Level.FINEST, String
+								.format("PlantChunk.load(): got result: w:%s x:%s y:%s z:%s date:%s growth:%s",
+										w, x, y, z, date, growth));
+
+				// if the plant does not correspond to an actual crop, don't load it
+				if (MaterialAliases.getConfig(plugin.materialGrowth, world.getBlockAt(x, y, z)) == null) {
+					RealisticBiomes.doLog(Level.FINER, "Plantchunk.load(): plant we got from db doesn't correspond to an actual crop, not loading");
+					continue;
+				}
+
+				Plant plant = new Plant(date, growth, fruitGrowth);
+				Block block = world.getBlockAt(x, y, z);
+				GrowthConfig growthConfig = MaterialAliases.getConfig(plugin.materialGrowth, block);
+				if (growthConfig.isPersistent()) {
+					plugin.growPlant(plant, block, growthConfig, null, dropGrouper);
+				}
+
+				// if the plant isn't finished growing, add it to the plants
+				if (!plant.isFullyGrown()) {
+					plants.put(new Coords(w, x, y, z), plant);
+					RealisticBiomes.doLog(Level.FINER, "PlantChunk.load(): plant not finished growing, adding to plants list");
+				}
+			}
+		});
 
 		dropGrouper.done();
 		
