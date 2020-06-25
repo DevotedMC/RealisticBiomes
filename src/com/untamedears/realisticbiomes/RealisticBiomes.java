@@ -364,11 +364,6 @@ public class RealisticBiomes extends JavaPlugin {
 	
 	@Override
 	public void onDisable() {
-		if (persistConfig.enabled) {
-			LOG.info("saving plant growth data.");
-			plantManager.saveAllAndStop();
-			plantManager = null;
-		}
 		taskQueueTask.cancel();
 		this.doLog(Level.INFO, "Running remaining tasks");
 		while (!rbTaskQueue.isEmpty()) {
@@ -377,6 +372,11 @@ public class RealisticBiomes extends JavaPlugin {
 			} catch (Exception e) {
 				this.doLog(Level.WARNING, "Exception thrown by task while disabling plugin", e);
 			}
+		}
+		if (persistConfig.enabled) {
+			LOG.info("saving plant growth data.");
+			plantManager.saveAllAndStop();
+			plantManager = null;
 		}
 		LOG.info("is now disabled.");
 	}
